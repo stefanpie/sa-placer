@@ -1,8 +1,0 @@
-FPGA Layout Summary
-Width: 64
-Height: 64
-CLB Count: 3472
-DSP Count: 0
-BRAM Count: 372
-IO Count: 248
-Empty Count: 4

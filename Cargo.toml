@@ -3,13 +3,29 @@ name = "sa-placer"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+name = "sa_placer_lib"
+path = "src/lib.rs"
+
+[[bin]]
+name = "sa_placer"
+path = "src/main.rs"
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 rand = "0.8.5"
 rayon = "1.8.0"
 resvg = "0.36.0"
+rustc-hash = "1.1.0"
 rustworkx-core = "0.13.2"
 tempfile = "3.8.0"
 tiny-skia = "0.11.2"
 usvg = "0.36.0"
+
+[dev-dependencies]
+criterion = "0.5.1"
+
+[[bench]]
+name = "sa_placer_benchmark"
+harness = false
