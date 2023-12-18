@@ -22,11 +22,11 @@ pub struct NetlistGraph {
 }
 
 impl NetlistGraph {
-    fn new() -> NetlistGraph {
-        NetlistGraph {
-            graph: petgraph::graph::DiGraph::new(),
-        }
-    }
+    // fn new() -> NetlistGraph {
+    //     NetlistGraph {
+    //         graph: petgraph::graph::DiGraph::new(),
+    //     }
+    // }
 
     pub fn all_nodes(&self) -> Vec<NetlistNode> {
         self.graph.node_weights().cloned().collect()

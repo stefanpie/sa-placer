@@ -1,4 +1,3 @@
-use std::error;
 use std::process::Command;
 
 use rand::seq::SliceRandom;
@@ -17,9 +16,9 @@ use rustc_hash::FxHashSet;
 
 #[derive(Debug, Clone, Copy)]
 pub enum PlacementAction {
-    MOVE,
-    SWAP,
-    MOVE_DIRECTED,
+    Move,
+    Swap,
+    MoveDirected,
 }
 
 #[derive(Debug, Clone)]
@@ -159,9 +158,9 @@ impl<'a> PlacementSolution<'a> {
 
     pub fn action(&mut self, action: PlacementAction) {
         match action {
-            PlacementAction::MOVE => self.action_move(),
-            PlacementAction::SWAP => self.action_swap(),
-            PlacementAction::MOVE_DIRECTED => self.action_move_directed(),
+            PlacementAction::Move => self.action_move(),
+            PlacementAction::Swap => self.action_swap(),
+            PlacementAction::MoveDirected => self.action_move_directed(),
         }
     }
 
@@ -597,7 +596,7 @@ pub fn placer_sa<'a>(
     for i in 0..n_steps {
         println!("Step: {}", i);
 
-        let actions: &[PlacementAction] = &[PlacementAction::MOVE, PlacementAction::SWAP];
+        let actions: &[PlacementAction] = &[PlacementAction::Move, PlacementAction::Swap];
 
         // Generate n_neighbors neighboring solutions in parallel
         let new_solutions: Vec<_> = (0..n_neighbors)
@@ -640,22 +639,43 @@ pub fn placer_sa<'a>(
     current_solution
 }
 
+pub struct PlacerOutput<'a> {
+    pub initial_solution: PlacementSolution<'a>,
+    pub final_solution: PlacementSolution<'a>,
+    pub x_steps: Vec<u32>,
+    pub y_cost: Vec<f32>,
+    pub renderer: Option<Renderer>,
+}
+
 pub fn fast_sa_placer(
     initial_solution: PlacementSolution,
     n_steps: u32,
     n_neighbors: usize, // number of neighbors to explore at each step
     verbose: bool,
-) -> PlacementSolution {
+    render: bool,
+    // ) -> PlacementSolution {
+) -> PlacerOutput {
+    let mut renderer = Renderer::new();
+
     let mut current_solution = initial_solution.clone();
 
     let mut rng = rand::thread_rng();
     let actions: &[PlacementAction] = &[
-        PlacementAction::MOVE,
-        PlacementAction::SWAP,
-        PlacementAction::MOVE_DIRECTED,
+        PlacementAction::Move,
+        PlacementAction::Swap,
+        PlacementAction::MoveDirected,
     ];
 
+    let mut x_steps = Vec::new();
+    let mut y_cost = Vec::new();
+
     for _i in 0..n_steps {
+        x_steps.push(_i);
+        y_cost.push(current_solution.cost_bb());
+        if render {
+            renderer.add_frame(current_solution.render_svg());
+        }
+
         // randomly select an actions
         let actions = actions.choose_multiple(&mut rng, n_neighbors);
 
@@ -680,9 +700,6 @@ pub fn fast_sa_placer(
             delta = best_delta;
         }
 
-        // println!("Current Itteration: {:?}", _i);
-        // println!("Delta Cost: {:?}", delta);
-        // println!("Current Cost: {:?}", current_solution.cost_bb());
         if verbose {
             if _i % 10 == 0 {
                 println!("Current Itteration: {:?}", _i);
@@ -692,5 +709,15 @@ pub fn fast_sa_placer(
         }
     }
 
-    current_solution
+    if render {
+        renderer.add_frame(current_solution.render_svg());
+    }
+
+    PlacerOutput {
+        initial_solution: initial_solution.clone(),
+        final_solution: current_solution.clone(),
+        x_steps: x_steps,
+        y_cost: y_cost,
+        renderer: if render { Some(renderer) } else { None },
+    }
 }

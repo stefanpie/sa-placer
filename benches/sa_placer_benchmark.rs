@@ -11,7 +11,7 @@ fn sa_placer_benchmark(c: &mut Criterion) {
     let initial_solution = black_box(gen_random_placement(&layout, &netlist));
 
     c.bench_function("fast_sa_placer", |b| {
-        b.iter(|| fast_sa_placer(initial_solution.clone(), 500, 16, false))
+        b.iter(|| fast_sa_placer(initial_solution.clone(), 500, 16, false, false))
     });
 }
 
@@ -27,10 +27,11 @@ fn sa_placer_large_benchmark(c: &mut Criterion) {
                 black_box(500),
                 black_box(16),
                 false,
+                false,
             )
         })
     });
 }
 
-criterion_group!(benches, sa_placer_benchmark);
+criterion_group!(benches, sa_placer_benchmark, sa_placer_large_benchmark);
 criterion_main!(benches);
