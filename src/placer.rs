@@ -2,9 +2,7 @@ use std::process::Command;
 
 use rand::seq::SliceRandom;
 use rand::Rng;
-use rayon::prelude::IntoParallelIterator;
-use rayon::prelude::IntoParallelRefIterator;
-use rayon::prelude::ParallelIterator;
+use rayon::prelude::*;
 use rustworkx_core::petgraph::visit::EdgeRef;
 use tempfile::tempdir;
 
@@ -384,6 +382,11 @@ impl<'a> PlacementSolution<'a> {
     }
 }
 
+pub enum InitialPlacerMethod {
+    Random,
+    Greedy,
+}
+
 pub fn gen_random_placement<'a>(
     layout: &'a FPGALayout,
     netlist: &'a NetlistGraph,
@@ -420,12 +423,12 @@ pub fn gen_random_placement<'a>(
     solution
 }
 
-pub fn gen_simple_placement<'a>(
+pub fn gen_greedy_placement<'a>(
     layout: &'a FPGALayout,
     netlist: &'a NetlistGraph,
 ) -> PlacementSolution<'a> {
-    // itterate over the netlist nodes
-    // placethem in the first spot in the layout in the top left corner
+    // place nodes in the first spot in the layout closest to the origin (0,0) which is the top left corner
+
     let mut solution = PlacementSolution::new(layout, netlist);
 
     let count_summary_layout = solution.layout.count_summary();
@@ -448,11 +451,11 @@ pub fn gen_simple_placement<'a>(
     let nodes = solution.netlist.all_nodes();
     for node in nodes {
         let possible_sites = solution.get_possible_sites(node.macro_type);
-        // get the site with the min manhattan distance to the origin
+        // get the site with the min manhattan distance to the origin (0,0)
         let location = possible_sites
             .iter()
             .min_by(|a, b| {
-                let a_distance = a.x + a.y;
+                let a_distance: u32 = a.x + a.y;
                 let b_distance = b.x + b.y;
                 a_distance.cmp(&b_distance)
             })
@@ -466,6 +469,18 @@ pub fn gen_simple_placement<'a>(
     solution
 }
 
+pub fn gen_initial_placement<'a>(
+    layout: &'a FPGALayout,
+    netlist: &'a NetlistGraph,
+    method: InitialPlacerMethod,
+) -> PlacementSolution<'a> {
+    match method {
+        InitialPlacerMethod::Random => gen_random_placement(layout, netlist),
+        InitialPlacerMethod::Greedy => gen_greedy_placement(layout, netlist),
+    }
+}
+
+#[derive(Clone)]
 pub struct Renderer {
     pub svg_renders: Vec<String>,
 }
@@ -481,10 +496,14 @@ impl Renderer {
         self.svg_renders.push(svg);
     }
 
-    pub fn render_to_video(&self, filename: &str, framerate: f64) {
-        println!("Rendering to video");
-
-        // tmpdir
+    pub fn render_to_video(
+        self,
+        output_name: &str,
+        output_dir: &str,
+        framerate: f64,
+        every_n_frames: usize,
+        make_gif: bool,
+    ) {
         let dir = tempdir().unwrap();
         let frame_dir = dir.path().join("frames");
         std::fs::create_dir(&frame_dir).unwrap();
@@ -492,20 +511,26 @@ impl Renderer {
         let mut input_frames_svg_paths = Vec::new();
 
         for (frame_number, svg) in self.svg_renders.iter().enumerate() {
-            // write the svg to a file
+            if frame_number % every_n_frames != 0 {
+                continue;
+            }
             let frame_fp = frame_dir.join(format!("frame_{}.svg", frame_number));
             input_frames_svg_paths.push(frame_fp.clone());
             std::fs::write(&frame_fp, svg).expect("Unable to write file");
         }
 
-        let num_threads = 64;
-        let pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(num_threads)
-            .build()
-            .unwrap();
+        // rename the every_n_frames frames to be sequential to not confuse ffmpeg
+        let mut input_frames_svg_paths_renumbered = Vec::new();
+        for (frame_number, svg_fp) in input_frames_svg_paths.iter().enumerate() {
+            let new_fp = frame_dir.join(format!("frame_{}.svg", frame_number));
+            std::fs::rename(svg_fp, &new_fp).expect("Unable to rename file");
+            input_frames_svg_paths_renumbered.push(new_fp);
+        }
 
-        pool.install(|| {
-            input_frames_svg_paths.par_iter().for_each(|svg_fp| {
+        // convert the frames to pngs
+        input_frames_svg_paths_renumbered
+            .par_iter()
+            .for_each(|svg_fp| {
                 let png_fp = svg_fp.with_extension("png");
                 println!("Converting {:?} to {:?} ... ", svg_fp, png_fp);
                 let _output: std::process::Output = std::process::Command::new("magick")
@@ -517,7 +542,6 @@ impl Renderer {
                     .output()
                     .expect("failed to execute magick");
             });
-        });
 
         // use ffmpeg to convert the frames to a video
         let mut ffmpeg_cmd = Command::new("ffmpeg");
@@ -530,113 +554,32 @@ impl Renderer {
         ffmpeg_cmd.arg("libx264");
         ffmpeg_cmd.arg("-pix_fmt");
         ffmpeg_cmd.arg("yuv420p");
-        ffmpeg_cmd.arg(format!("{}.mp4", filename));
+        ffmpeg_cmd.arg(format!("{}/{}.mp4", output_dir, output_name));
 
         let child = ffmpeg_cmd.spawn().expect("failed to execute ffmpeg");
         child.wait_with_output().expect("failed to wait on ffmpeg");
-    }
-}
 
-// fn placer_sa(
-//     initial_solution: PalcementSolution,
-//     n_steps: u32,
-//     renderer: &mut Renderer,
-//     render_frequency: u32,
-// ) -> PalcementSolution {
-//     let mut current_solution = initial_solution.clone();
+        if make_gif {
+            // use ffmpeg to convert the frames to a gif
+            let mut ffmpeg_cmd = Command::new("ffmpeg");
+            ffmpeg_cmd.arg("-y");
+            ffmpeg_cmd.arg("-framerate");
+            ffmpeg_cmd.arg(format!("{}", framerate));
+            ffmpeg_cmd.arg("-i");
+            ffmpeg_cmd.arg(frame_dir.join("frame_%d.png").to_str().unwrap());
 
-//     renderer.add_frame(initial_solution.render_svg());
+            // Optimize gif size using rescaling and color pallet reduction
+            ffmpeg_cmd.arg("-filter_complex");
+            ffmpeg_cmd.arg(format!(
+                "scale=iw/2:-1,split [a][b];[a] palettegen=stats_mode=diff:max_colors=32[p]; [b][p] paletteuse=dither=bayer",
+            ));
 
-//     for i in 0..n_steps {
-//         println!("Step: {}", i);
+            ffmpeg_cmd.arg(format!("{}/{}.gif", output_dir, output_name));
 
-//         let mut new_solution = current_solution.clone();
-
-//         // make a list to the actions to take
-//         let actions: &[PlacementAction] = &[PlacementAction::MOVE, PlacementAction::SWAP];
-
-//         // randomly select an action
-//         let mut rng = rand::thread_rng();
-//         let action: PlacementAction = actions[rng.gen_range(0..actions.len())];
-
-//         println!("Action: {:?} ", action);
-//         // take the action
-//         new_solution.action(action);
-
-//         let delta_cost = new_solution.cost_bb() - current_solution.cost_bb();
-
-//         if delta_cost < 0.0 {
-//             current_solution = new_solution;
-//             println!("Delta Cost: {} (ACCEPT)", delta_cost);
-//         } else {
-//             println!("Delta Cost: {} (REJECT)", delta_cost);
-//         }
-
-//         println!("Current Cost: {:?}", current_solution.cost_bb());
-//         println!();
-
-//         if i % render_frequency == 0 {
-//             renderer.add_frame(current_solution.render_svg());
-//         }
-//     }
-
-//     current_solution
-// }
-
-pub fn placer_sa<'a>(
-    initial_solution: PlacementSolution<'a>,
-    n_steps: u32,
-    renderer: &mut Renderer,
-    render_frequency: u32,
-    n_neighbors: usize, // number of neighbors to explore in parallel
-) -> PlacementSolution<'a> {
-    let mut current_solution = initial_solution.clone();
-    renderer.add_frame(initial_solution.render_svg());
-
-    for i in 0..n_steps {
-        println!("Step: {}", i);
-
-        let actions: &[PlacementAction] = &[PlacementAction::Move, PlacementAction::Swap];
-
-        // Generate n_neighbors neighboring solutions in parallel
-        let new_solutions: Vec<_> = (0..n_neighbors)
-            .into_par_iter()
-            .map(|_| {
-                let mut rng = rand::thread_rng();
-                let mut new_solution = current_solution.clone();
-                let action: PlacementAction = actions[rng.gen_range(0..actions.len())];
-                new_solution.action(action);
-                let new_cost = new_solution.cost_bb(); // Compute the cost first
-                (new_solution, new_cost) // Then use both in the tuple
-            })
-            .collect();
-
-        // Find the best new solution based on delta_cost
-        if let Some((best_new_solution, best_new_cost)) =
-            new_solutions.into_iter().min_by(|(_, cost1), (_, cost2)| {
-                (cost1 - current_solution.cost_bb())
-                    .partial_cmp(&(cost2 - current_solution.cost_bb()))
-                    .unwrap()
-            })
-        {
-            let delta_cost = best_new_cost - current_solution.cost_bb();
-            if delta_cost < 0.0 {
-                current_solution = best_new_solution;
-                println!("Delta Cost: {} (ACCEPT)", delta_cost);
-            } else {
-                println!("Delta Cost: {} (REJECT)", delta_cost);
-            }
-        }
-
-        println!("Current Cost: {:?}", current_solution.cost_bb());
-        println!();
-
-        if i % render_frequency == 0 {
-            renderer.add_frame(current_solution.render_svg());
+            let child = ffmpeg_cmd.spawn().expect("failed to execute ffmpeg");
+            child.wait_with_output().expect("failed to wait on ffmpeg");
         }
     }
-
-    current_solution
 }
 
 pub struct PlacerOutput<'a> {
@@ -653,7 +596,6 @@ pub fn fast_sa_placer(
     n_neighbors: usize, // number of neighbors to explore at each step
     verbose: bool,
     render: bool,
-    // ) -> PlacementSolution {
 ) -> PlacerOutput {
     let mut renderer = Renderer::new();
 
@@ -676,16 +618,20 @@ pub fn fast_sa_placer(
             renderer.add_frame(current_solution.render_svg());
         }
 
-        // randomly select an actions
-        let actions = actions.choose_multiple(&mut rng, n_neighbors);
+        // randomly select actions
+        let actions: Vec<_> = actions.choose_multiple(&mut rng, n_neighbors).collect();
 
-        // generate new solutions
-        let new_solutions = actions.map(|action| {
-            let mut new_solution = current_solution.clone();
-            new_solution.action(*action);
-            new_solution
-        });
+        let new_solutions: Vec<_> = actions
+            .into_par_iter()
+            .map(|action| {
+                let mut new_solution = current_solution.clone();
+                new_solution.action(*action);
+                new_solution
+            })
+            .collect();
+
         let best_solution = new_solutions
+            .iter()
             .min_by(|sol1, sol2| {
                 (sol1.cost_bb() - current_solution.cost_bb())
                     .partial_cmp(&(sol2.cost_bb() - current_solution.cost_bb()))
@@ -696,7 +642,7 @@ pub fn fast_sa_placer(
         let best_delta = best_solution.cost_bb() - current_solution.cost_bb();
         let mut delta = 0.0;
         if best_delta < 0.0 {
-            current_solution = best_solution;
+            current_solution = best_solution.clone();
             delta = best_delta;
         }
 

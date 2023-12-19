@@ -152,7 +152,7 @@ impl FPGALayout {
         count_summary
     }
 
-    pub fn render_summary(&mut self) -> String {
+    pub fn render_summary(&self) -> String {
         let mut output: String = String::new();
 
         // print the x, y size of the descive
