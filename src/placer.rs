@@ -12,6 +12,8 @@ use super::netlist::*;
 use rustc_hash::FxHashMap;
 use rustc_hash::FxHashSet;
 
+use itertools::Itertools;
+
 #[derive(Debug, Clone, Copy)]
 pub enum PlacementAction {
     Move,
@@ -40,7 +42,7 @@ impl<'a> PlacementSolution<'a> {
 
         // Randomly select a node
         let node = match self.netlist.all_nodes().choose(&mut rng) {
-            Some(n) => n.clone(),
+            Some(n) => *n,
             None => return,
         };
 
@@ -54,11 +56,11 @@ impl<'a> PlacementSolution<'a> {
 
         // Randomly select a location
         let location = match possible_sites.choose(&mut rng) {
-            Some(l) => l.clone(),
+            Some(l) => *l,
             None => return,
         };
 
-        self.solution_map.insert(node, location);
+        self.solution_map.insert(*node, location);
     }
 
     pub fn action_swap(&mut self) {
@@ -66,18 +68,17 @@ impl<'a> PlacementSolution<'a> {
 
         // Randomly select a node (node_a)
         let node_a = match self.netlist.all_nodes().choose(&mut rng) {
-            Some(n) => n.clone(),
+            Some(n) => *n,
             None => return,
         };
 
         // Filter nodes of the same type as node_a
-        let nodes_same_type: Vec<NetlistNode> = self
+        let nodes_same_type = self
             .netlist
             .all_nodes()
-            .iter()
-            .filter(|&&node| node.macro_type == node_a.macro_type)
-            .cloned()
-            .collect();
+            .into_iter()
+            .filter(|node| node.macro_type == node_a.macro_type)
+            .collect_vec();
 
         // If no nodes of the same type, return
         if nodes_same_type.is_empty() {
@@ -86,18 +87,18 @@ impl<'a> PlacementSolution<'a> {
 
         // Randomly select another node (node_b) of the same type
         let node_b = match nodes_same_type.choose(&mut rng) {
-            Some(n) => n.clone(),
+            Some(n) => *n,
             None => return,
         };
 
         // Clone the locations first to avoid borrowing issues
-        let loc_a = self.solution_map.get(&node_a).cloned();
-        let loc_b = self.solution_map.get(&node_b).cloned();
+        let loc_a = self.solution_map.get(node_a).cloned();
+        let loc_b = self.solution_map.get(node_b).cloned();
 
         // Perform the swap
         if let (Some(loc_a), Some(loc_b)) = (loc_a, loc_b) {
-            self.solution_map.insert(node_a, loc_b);
-            self.solution_map.insert(node_b, loc_a);
+            self.solution_map.insert(*node_a, loc_b);
+            self.solution_map.insert(*node_b, loc_a);
         }
     }
 
@@ -126,7 +127,7 @@ impl<'a> PlacementSolution<'a> {
         let mut rng = rand::thread_rng();
 
         // pick a random node
-        let node: NetlistNode = self.netlist.all_nodes()[rng.gen_range(0..node_count as usize)];
+        let node = self.netlist.all_nodes()[rng.gen_range(0..node_count as usize)];
 
         let valid_locations = self.get_possible_sites(node.macro_type);
         let valid_closest_location = valid_locations
@@ -141,7 +142,7 @@ impl<'a> PlacementSolution<'a> {
             .unwrap();
 
         // if the new location is futher away from the mean than the current location, return
-        let current_location = self.solution_map.get(&node).unwrap();
+        let current_location = self.solution_map.get(node).unwrap();
         let current_distance = (current_location.x as i32 - x_mean as i32).abs()
             + (current_location.y as i32 - y_mean as i32).abs();
         let new_distance = (valid_closest_location.x as i32 - x_mean as i32).abs()
@@ -150,8 +151,7 @@ impl<'a> PlacementSolution<'a> {
             return;
         }
 
-        self.solution_map
-            .insert(node, valid_closest_location.clone());
+        self.solution_map.insert(*node, *valid_closest_location);
     }
 
     pub fn action(&mut self, action: PlacementAction) {
@@ -163,7 +163,7 @@ impl<'a> PlacementSolution<'a> {
     }
 
     pub fn cost_bb(&self) -> f32 {
-        let mut cost = 0.0;
+        let mut cost = 0;
 
         for edge in self.netlist.graph.edge_references() {
             let source_idx = edge.source();
@@ -175,21 +175,21 @@ impl<'a> PlacementSolution<'a> {
             let source_location = self.solution_map.get(source).unwrap();
             let target_location = self.solution_map.get(target).unwrap();
 
-            let x_distance = (source_location.x as i32 - target_location.x as i32).abs();
-            let y_distance = (source_location.y as i32 - target_location.y as i32).abs();
+            let x_distance = source_location.x.abs_diff(target_location.x);
+            let y_distance = source_location.y.abs_diff(target_location.y);
 
             let distance = x_distance + y_distance;
-            cost += distance as f32;
+            cost += distance;
         }
 
-        cost
+        cost as f32
     }
 
     pub fn render_svg(&self) -> String {
         let mut svg = String::new();
 
         svg.push_str(&format!(
-            "<svg width=\"{}\" height=\"{}\" xmlns=\"http://www.w3.org/2000/svg\" style=\"background-color:white\">\n",
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" style=\"background-color:white\" viewBox=\"0 0 {} {}\">\n",
             self.layout.width * 100,
             self.layout.height * 100
         ));
@@ -279,7 +279,7 @@ impl<'a> PlacementSolution<'a> {
 
         for node in self.netlist.graph.node_weights() {
             if !self.solution_map.contains_key(node) {
-                unplaced_nodes.push(node.clone());
+                unplaced_nodes.push(*node);
             }
         }
 
@@ -291,7 +291,7 @@ impl<'a> PlacementSolution<'a> {
 
         let mut placed_locations = FxHashSet::default();
         for location in self.solution_map.values() {
-            placed_locations.insert(location.clone());
+            placed_locations.insert(*location);
         }
 
         for x in 0..self.layout.width {
@@ -326,7 +326,8 @@ impl<'a> PlacementSolution<'a> {
     }
 
     pub fn valid(&self) -> bool {
-        let netlist_nodes: Vec<NetlistNode> = self.netlist.all_nodes();
+        // let netlist_nodes: Vec<NetlistNode> = self.netlist.all_nodes();
+        let netlist_nodes = self.netlist.graph.node_weights().collect_vec();
         let netlist_nodes_ids = netlist_nodes
             .iter()
             .map(|node| node.id)
@@ -334,7 +335,7 @@ impl<'a> PlacementSolution<'a> {
 
         // Check that all the nodes in the netlist are in the solution map
         for node in self.netlist.graph.node_weights() {
-            if !self.solution_map.contains_key(&node) {
+            if !self.solution_map.contains_key(node) {
                 return false;
             }
         }
@@ -352,7 +353,7 @@ impl<'a> PlacementSolution<'a> {
             if used_locations.contains(location) {
                 return false;
             }
-            used_locations.insert(location.clone());
+            used_locations.insert(*location);
         }
 
         // check that each node in the netlist is only used once
@@ -361,7 +362,7 @@ impl<'a> PlacementSolution<'a> {
             if used_nodes.contains(node) {
                 return false;
             }
-            used_nodes.insert(node.clone());
+            used_nodes.insert(*node);
         }
 
         // check that nodes are placed on the correct type of macro
@@ -415,7 +416,7 @@ pub fn gen_random_placement<'a>(
     for node in solution.netlist.all_nodes() {
         let possible_sites = solution.get_possible_sites(node.macro_type);
         let location: FPGALayoutCoordinate = possible_sites[rng.gen_range(0..possible_sites.len())];
-        solution.place_node(node, location);
+        solution.place_node(*node, location);
     }
 
     assert!(solution.valid());
@@ -461,7 +462,7 @@ pub fn gen_greedy_placement<'a>(
             })
             .unwrap();
 
-        solution.place_node(node, location.clone());
+        solution.place_node(*node, *location);
     }
 
     assert!(solution.valid());
@@ -483,6 +484,12 @@ pub fn gen_initial_placement<'a>(
 #[derive(Clone)]
 pub struct Renderer {
     pub svg_renders: Vec<String>,
+}
+
+impl Default for Renderer {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Renderer {
@@ -570,9 +577,7 @@ impl Renderer {
 
             // Optimize gif size using rescaling and color pallet reduction
             ffmpeg_cmd.arg("-filter_complex");
-            ffmpeg_cmd.arg(format!(
-                "scale=iw/2:-1,split [a][b];[a] palettegen=stats_mode=diff:max_colors=32[p]; [b][p] paletteuse=dither=bayer",
-            ));
+            ffmpeg_cmd.arg("scale=iw/2:-1,split [a][b];[a] palettegen=stats_mode=diff:max_colors=32[p]; [b][p] paletteuse=dither=bayer");
 
             ffmpeg_cmd.arg(format!("{}/{}.gif", output_dir, output_name));
 
@@ -622,7 +627,8 @@ pub fn fast_sa_placer(
         let actions: Vec<_> = actions.choose_multiple(&mut rng, n_neighbors).collect();
 
         let new_solutions: Vec<_> = actions
-            .into_par_iter()
+            // .into_par_iter()
+            .into_iter()
             .map(|action| {
                 let mut new_solution = current_solution.clone();
                 new_solution.action(*action);
@@ -646,12 +652,10 @@ pub fn fast_sa_placer(
             delta = best_delta;
         }
 
-        if verbose {
-            if _i % 10 == 0 {
-                println!("Current Itteration: {:?}", _i);
-                println!("Delta Cost: {:?}", delta);
-                println!("Current Cost: {:?}", current_solution.cost_bb());
-            }
+        if verbose && _i % 10 == 0 {
+            println!("Current Itteration: {:?}", _i);
+            println!("Delta Cost: {:?}", delta);
+            println!("Current Cost: {:?}", current_solution.cost_bb());
         }
     }
 
@@ -662,8 +666,8 @@ pub fn fast_sa_placer(
     PlacerOutput {
         initial_solution: initial_solution.clone(),
         final_solution: current_solution.clone(),
-        x_steps: x_steps,
-        y_cost: y_cost,
+        x_steps,
+        y_cost,
         renderer: if render { Some(renderer) } else { None },
     }
 }

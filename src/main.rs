@@ -112,7 +112,7 @@ fn main() {
     for n in config_data_collection.clone().iter() {
         let mut wtr: csv::Writer<std::fs::File> =
             csv::Writer::from_path(format!("output_data/fpga_placer_history_{}.csv", n)).unwrap();
-        wtr.write_record(&["step", "obj_fn_value"]).unwrap();
+        wtr.write_record(["step", "obj_fn_value"]).unwrap();
         let x_series = x_data_collection.get(n).unwrap();
         let y_series = y_data_collection.get(n).unwrap();
         for (x, y) in x_series.iter().zip(y_series.iter()) {
@@ -124,7 +124,7 @@ fn main() {
     // one big csv with all the data
     let mut wtr: csv::Writer<std::fs::File> =
         csv::Writer::from_path("output_data/fpga_placer_history.csv").unwrap();
-    wtr.write_record(&["step", "obj_fn_value", "n_neighbors"])
+    wtr.write_record(["step", "obj_fn_value", "n_neighbors"])
         .unwrap();
     for n_neighbors in config_data_collection.clone() {
         let x_series = x_data_collection.get(&n_neighbors).unwrap();
@@ -170,19 +170,19 @@ fn main() {
     config_data_collection.par_iter().for_each(|&n_neighbors| {
         let solution = final_solution_collection.get(&n_neighbors).unwrap();
         render_solution_to_png(
-            &solution,
+            solution,
             &format!("final_solution_{}", n_neighbors),
             "./output_data",
             false,
         );
 
-        let renderer: Renderer = render_collection.get(&n_neighbors).unwrap().clone();
-        renderer.render_to_video(
-            &format!("placer_animation_{}", n_neighbors),
-            "./output_data",
-            30.0,
-            20,
-            true,
-        );
+        // let renderer: Renderer = render_collection.get(&n_neighbors).unwrap().clone();
+        // renderer.render_to_video(
+        //     &format!("placer_animation_{}", n_neighbors),
+        //     "./output_data",
+        //     30.0,
+        //     20,
+        //     true,
+        // );
     });
 }
