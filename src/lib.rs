@@ -1,5 +1,5 @@
-#![feature(portable_simd)]
-#![feature(iter_array_chunks)]
+// #![feature(portable_simd)]
+// #![feature(iter_array_chunks)]
 
 pub mod fpga_layout;
 pub mod netlist;

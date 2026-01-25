@@ -106,7 +106,7 @@ fn main() {
     let y_data_collection = y_data_collection.into_inner().unwrap();
 
     let final_solution_collection = final_solution_collection.into_inner().unwrap();
-    let render_collection = render_collection.into_inner().unwrap();
+    let _render_collection = render_collection.into_inner().unwrap();
 
     // csv for each n_neighbors
     for n in config_data_collection.clone().iter() {

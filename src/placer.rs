@@ -163,10 +163,9 @@ impl<'a> PlacementSolution<'a> {
     }
 
     pub fn cost_bb(&self) -> f32 {
-        let mut cost = 0;
-
-        for edge in self.netlist.graph.edge_references() {
-            let source_idx = edge.source();
+        let edges = self.netlist.graph.edge_references();
+        let loc_iter = edges.map(|edge| {
+            let source_idx: rustworkx_core::petgraph::prelude::NodeIndex = edge.source();
             let target_idx = edge.target();
 
             let source = self.netlist.graph.node_weight(source_idx).unwrap();
@@ -175,12 +174,35 @@ impl<'a> PlacementSolution<'a> {
             let source_location = self.solution_map.get(source).unwrap();
             let target_location = self.solution_map.get(target).unwrap();
 
-            let x_distance = source_location.x.abs_diff(target_location.x);
-            let y_distance = source_location.y.abs_diff(target_location.y);
+            (source_location, target_location)
+        });
 
-            let distance = x_distance + y_distance;
-            cost += distance;
-        }
+        let distance_iter = loc_iter.map(|(source, target)| {
+            let x_distance = source.x.abs_diff(target.x);
+            let y_distance = source.y.abs_diff(target.y);
+            (x_distance, y_distance)
+        });
+
+        let cost_iter = distance_iter.map(|(x_distance, y_distance)| x_distance + y_distance);
+
+        let cost = cost_iter.sum::<u32>();
+
+        // for edge in self.netlist.graph.edge_references() {
+        //     let source_idx = edge.source();
+        //     let target_idx = edge.target();
+
+        //     let source = self.netlist.graph.node_weight(source_idx).unwrap();
+        //     let target = self.netlist.graph.node_weight(target_idx).unwrap();
+
+        //     let source_location = self.solution_map.get(source).unwrap();
+        //     let target_location = self.solution_map.get(target).unwrap();
+
+        //     let x_distance = source_location.x.abs_diff(target_location.x);
+        //     let y_distance = source_location.y.abs_diff(target_location.y);
+
+        //     let distance = x_distance + y_distance;
+        //     cost += distance;
+        // }
 
         cost as f32
     }
@@ -627,8 +649,8 @@ pub fn fast_sa_placer(
         let actions: Vec<_> = actions.choose_multiple(&mut rng, n_neighbors).collect();
 
         let new_solutions: Vec<_> = actions
-            // .into_par_iter()
-            .into_iter()
+            .into_par_iter()
+            // .into_iter()
             .map(|action| {
                 let mut new_solution = current_solution.clone();
                 new_solution.action(*action);
@@ -636,20 +658,24 @@ pub fn fast_sa_placer(
             })
             .collect();
 
-        let best_solution = new_solutions
+        let new_solution_delta: Vec<_> = new_solutions
             .iter()
-            .min_by(|sol1, sol2| {
-                (sol1.cost_bb() - current_solution.cost_bb())
-                    .partial_cmp(&(sol2.cost_bb() - current_solution.cost_bb()))
-                    .unwrap()
-            })
-            .unwrap();
+            .map(|sol| sol.cost_bb() - current_solution.cost_bb())
+            .collect();
 
-        let best_delta = best_solution.cost_bb() - current_solution.cost_bb();
-        let mut delta = 0.0;
-        if best_delta < 0.0 {
-            current_solution = best_solution.clone();
-            delta = best_delta;
+        let min_solution_delta_index = new_solution_delta
+            .iter()
+            .enumerate()
+            .min_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+            .unwrap()
+            .0;
+
+        let min_delta = new_solution_delta[min_solution_delta_index];
+
+        let mut delta: f32 = 0.0;
+        if min_delta < 0.0 {
+            current_solution = new_solutions[min_solution_delta_index].clone();
+            delta = min_delta;
         }
 
         if verbose && _i % 10 == 0 {
